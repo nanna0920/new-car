@@ -139,7 +139,7 @@
         @media (max-width: 768px) { .upload-group { grid-template-columns: 1fr; } .compare-table { font-size: 9pt; } }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://unpkg.com/pocketbase/dist/pocketbase.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
     <div class="container">
@@ -234,7 +234,7 @@
 
             <!-- DB 기록 탭 -->
             <div id="dbrecordsTab" class="main-tab-content">
-                <h3 style="color:#333; margin-bottom:16px;">🗄️ PocketBase DB 기록</h3>
+                <h3 style="color:#333; margin-bottom:16px;">☁️ Supabase DB 기록</h3>
                 <div class="tab-container" style="margin-bottom:0;">
                     <button class="tab-btn active" id="dbSubTabCarservice" onclick="switchDbSubTab('carservice')">📊 이동서비스 분석</button>
                     <button class="tab-btn" id="dbSubTabCartime" onclick="switchDbSubTab('cartime')">🚌 송영시간표 비교</button>
@@ -364,7 +364,7 @@
             <div class="download-section">
                 <a href="#" class="download-btn" onclick="downloadExcel('date')">📥 일자별 엑셀 다운로드</a>
                 <a href="#" class="download-btn" onclick="downloadExcel('driver')">📥 운전자별 엑셀 다운로드</a>
-                <button onclick="saveToSupabase()" style="display:inline-block; padding:12px 25px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; margin:5px; font-size:1em;">💾 PocketBase에 저장</button>
+                <button onclick="saveToSupabase()" style="display:inline-block; padding:12px 25px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; margin:5px; font-size:1em;">☁️ Supabase에 저장</button>
             </div>
             <div id="saveStatusMsg" style="text-align:center; margin-top:8px; font-weight:bold; display:none;"></div>
         </div>
@@ -412,7 +412,7 @@
             <div class="download-section">
                 <a href="#" class="download-btn" onclick="downloadCompareExcel('date')">📥 일자별 엑셀 다운로드</a>
                 <a href="#" class="download-btn" onclick="downloadCompareExcel('employee')">📥 직원별 엑셀 다운로드</a>
-                <button onclick="saveWorkingTimeToSupabase()" style="display:inline-block; padding:12px 25px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; margin:5px; font-size:1em;">💾 PocketBase에 저장</button>
+                <button onclick="saveWorkingTimeToSupabase()" style="display:inline-block; padding:12px 25px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; margin:5px; font-size:1em;">☁️ Supabase에 저장</button>
             </div>
             <div id="workingtimeSaveStatusMsg" style="text-align:center; margin-top:8px; font-weight:bold; display:none;"></div>
         </div>
@@ -469,7 +469,7 @@
             <div class="download-section">
                 <a href="#" class="download-btn" onclick="downloadScheduleExcel()">📥 전체 엑셀 다운로드</a>
                 <a href="#" class="download-btn" style="background:#dc3545;" onclick="downloadScheduleExcel('diff')">📥 다름만 엑셀 다운로드</a>
-                <button onclick="saveCarTimeToSupabase()" style="display:inline-block; padding:12px 25px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; margin:5px; font-size:1em;">💾 PocketBase에 저장</button>
+                <button onclick="saveCarTimeToSupabase()" style="display:inline-block; padding:12px 25px; background:linear-gradient(135deg,#11998e,#38ef7d); color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; margin:5px; font-size:1em;">☁️ Supabase에 저장</button>
             </div>
             <div id="cartimeSaveStatusMsg" style="text-align:center; margin-top:8px; font-weight:bold; display:none;"></div>
         </div>
@@ -854,6 +854,16 @@
                         if (!pmBySeq[currentPmSeq]) pmBySeq[currentPmSeq] = [];
                         pmBySeq[currentPmSeq].push({beneficiary: pmBeneficiary, time: pmTimeStr, car: (pmCar !== 'nan' ? pmCar : ''), driver: (pmDriver !== 'nan' ? pmDriver : '')});
                     }
+                }
+
+                // 하단 '송영도움/실제 도착시간' 요약 영역 시작 행을 만나면, 이 행까지는 처리하고
+                // 그 다음 행부터는 더 이상 읽지 않는다.
+                // (이 영역에 적힌 '진금순' 등의 이름+시간이 실제 탑승자 행처럼 잘못 파싱되어,
+                //  맨 마지막 순번 그룹의 차량/운전자로 본래 값을 덮어써버리는 문제를 방지한다.)
+                var footerLabel = cellVal(ws, r, 3).trim();
+                var pmBenefCheck = cellVal(ws, r, 8).trim();
+                if (footerLabel === '송영도움' || pmBenefCheck.indexOf('실제 도착시간') === 0) {
+                    break;
                 }
             }
             
@@ -2164,52 +2174,10 @@
             downloadExcelFile(data, headers, fname, '송영시간표 비교');
         }
 
-        // ===== PocketBase 연동 =====
-        // ※ 서버 주소를 실제 환경에 맞게 변경하세요.
-        const PB_URL = 'http://192.168.45.223:8090';
-        const pb = new PocketBase(PB_URL);
-        pb.autoCancellation(false);
-
-        // upsert 헬퍼: create 시도 → 중복(400/409)이면 update
-        async function pbUpsert(collection, rows, conflictKeys) {
-            const errors = [];
-            for (const row of rows) {
-                try {
-                    await pb.collection(collection).create(row);
-                } catch(e) {
-                    if (e?.status === 400 || e?.status === 409) {
-                        try {
-                            const fp = conflictKeys.map(k => `${k}="${String(row[k]).replace(/"/g,'\\"')}"`).join(' && ');
-                            const existing = await pb.collection(collection).getFirstListItem(fp);
-                            if (existing) {
-                                const body = Object.assign({}, row);
-                                delete body.id;
-                                await pb.collection(collection).update(existing.id, body);
-                            }
-                        } catch(e2) { errors.push(e2); }
-                    } else { errors.push(e); }
-                }
-            }
-            return errors.length ? { error: { message: errors[0]?.message || '저장 오류' } } : { error: null };
-        }
-
-        // 다건 삭제 헬퍼
-        async function pbDeleteByIds(collection, ids) {
-            const errors = [];
-            for (const id of ids) {
-                try { await pb.collection(collection).delete(id); }
-                catch(e) { errors.push(e); }
-            }
-            return errors.length ? { error: { message: errors[0]?.message || '삭제 오류' } } : { error: null };
-        }
-
-        // 전체 삭제 헬퍼
-        async function pbDeleteAll(collection) {
-            try {
-                const all = await pb.collection(collection).getFullList({ fields: 'id' });
-                return await pbDeleteByIds(collection, all.map(r => r.id));
-            } catch(e) { return { error: { message: e?.message || '전체 삭제 오류' } }; }
-        }
+        // ===== Supabase 연동 =====
+        const SUPABASE_URL = 'https://bmrpktwfvtvekkogxgwv.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtcnBrdHdmdnR2ZWtrb2d4Z3d2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNTg2MTksImV4cCI6MjA4NzczNDYxOX0.r8Z56PacMI16B_Je7y2wOBHp0GBc3DXSHI0FaiF5f7k';
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         let dbAllRecords = [];
         let dbSortCol = 'date';
@@ -2223,7 +2191,7 @@
             const msgEl = document.getElementById('saveStatusMsg');
             msgEl.style.display = 'block';
             msgEl.style.color = '#555';
-            msgEl.textContent = '⏳ PocketBase에 저장 중...';
+            msgEl.textContent = '⏳ Supabase에 저장 중...';
 
             const rows = analysisData.by_date.map(item => ({
                 date: item.date,
@@ -2232,14 +2200,16 @@
                 last_end: item.last_end !== '-' ? item.last_end : null
             }));
 
-            const { error } = await pbUpsert('carservice_items', rows, ['date', 'driver']);
+            const { error } = await supabaseClient
+                .from('carservice_items')
+                .upsert(rows, { onConflict: 'date,driver' });
 
             if (error) {
                 msgEl.style.color = '#dc3545';
                 msgEl.textContent = '❌ 저장 실패: ' + error.message;
             } else {
                 msgEl.style.color = '#28a745';
-                msgEl.textContent = '✅ ' + rows.length + '건이 PocketBase에 저장되었습니다.';
+                msgEl.textContent = '✅ ' + rows.length + '건이 Supabase에 저장되었습니다.';
                 setTimeout(() => { msgEl.style.display = 'none'; }, 4000);
             }
         }
@@ -2247,14 +2217,21 @@
         async function loadDbRecords() {
             const content = document.getElementById('dbRecordsContent');
             content.innerHTML = '<div style="text-align:center;padding:30px;color:#666;">⏳ 데이터를 불러오는 중...</div>';
-            try {
-                const data = await pb.collection('carservice_items').getFullList({ sort: '+date,+driver' });
-                dbAllRecords = data || [];
-                buildDbFilters();
-                renderDbRecords();
-            } catch(e) {
-                content.innerHTML = '<div class="error">❌ 데이터 로드 실패: ' + (e?.message || '오류') + '</div>';
+
+            const { data, error } = await supabaseClient
+                .from('carservice_items')
+                .select('*')
+                .order('date', { ascending: true })
+                .order('driver', { ascending: true });
+
+            if (error) {
+                content.innerHTML = '<div class="error">❌ 데이터 로드 실패: ' + error.message + '</div>';
+                return;
             }
+
+            dbAllRecords = data || [];
+            buildDbFilters();
+            renderDbRecords();
         }
 
         function buildDbFilters() {
@@ -2373,12 +2350,11 @@
 
         async function deleteDbRecord(id, date) {
             if (!confirm(date + ' 날짜의 이 기록을 삭제하시겠습니까?')) return;
-            try {
-                await pb.collection('carservice_items').delete(id);
-                dbAllRecords = dbAllRecords.filter(r => r.id !== id);
-                renderDbRecords();
-                showDbStatus('✅ 기록이 삭제되었습니다.');
-            } catch(e) { alert('삭제 실패: ' + (e?.message || '오류')); }
+            const { error } = await supabaseClient.from('carservice_items').delete().eq('id', id);
+            if (error) { alert('삭제 실패: ' + error.message); return; }
+            dbAllRecords = dbAllRecords.filter(r => r.id !== id);
+            renderDbRecords();
+            showDbStatus('✅ 기록이 삭제되었습니다.');
         }
 
         async function deleteAllDbRecords() {
@@ -2387,7 +2363,7 @@
             const label = (yearFilter ? yearFilter + '년 ' : '') + (monthFilter ? parseInt(monthFilter) + '월 ' : '전체 ');
             if (!confirm(label + '기록을 모두 삭제하시겠습니까?')) return;
 
-            let result;
+            let query = supabaseClient.from('carservice_items').delete();
             if (yearFilter || monthFilter) {
                 const filtered = dbAllRecords.filter(r => {
                     if (yearFilter && !r.date.startsWith(yearFilter)) return false;
@@ -2396,11 +2372,13 @@
                 });
                 const ids = filtered.map(r => r.id);
                 if (ids.length === 0) { alert('삭제할 기록이 없습니다.'); return; }
-                result = await pbDeleteByIds('carservice_items', ids);
+                query = supabaseClient.from('carservice_items').delete().in('id', ids);
             } else {
-                result = await pbDeleteAll('carservice_items');
+                query = supabaseClient.from('carservice_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
             }
-            if (result.error) { alert('삭제 실패: ' + result.error.message); return; }
+
+            const { error } = await query;
+            if (error) { alert('삭제 실패: ' + error.message); return; }
             await loadDbRecords();
             showDbStatus('✅ 선택한 기록이 모두 삭제되었습니다.');
         }
@@ -2440,7 +2418,7 @@
             const msgEl = document.getElementById('cartimeSaveStatusMsg');
             msgEl.style.display = 'block';
             msgEl.style.color = '#555';
-            msgEl.textContent = '⏳ PocketBase에 저장 중...';
+            msgEl.textContent = '⏳ Supabase에 저장 중...';
 
             const rows = [];
             Object.keys(scheduleData.results).forEach(dateKey => {
@@ -2467,14 +2445,16 @@
                 });
             });
 
-            const { error } = await pbUpsert('cartime_items', rows, ['date', 'beneficiary']);
+            const { error } = await supabaseClient
+                .from('cartime_items')
+                .upsert(rows, { onConflict: 'date,beneficiary' });
 
             if (error) {
                 msgEl.style.color = '#dc3545';
                 msgEl.textContent = '❌ 저장 실패: ' + error.message;
             } else {
                 msgEl.style.color = '#28a745';
-                msgEl.textContent = '✅ ' + rows.length + '건이 PocketBase에 저장되었습니다.';
+                msgEl.textContent = '✅ ' + rows.length + '건이 Supabase에 저장되었습니다.';
                 setTimeout(() => { msgEl.style.display = 'none'; }, 4000);
             }
         }
@@ -2482,16 +2462,23 @@
         async function loadCarTimeRecords() {
             const content = document.getElementById('ctRecordsContent');
             content.innerHTML = '<div style="text-align:center;padding:30px;color:#666;">⏳ 데이터를 불러오는 중...</div>';
-            try {
-                const data = await pb.collection('cartime_items').getFullList({ sort: '+date,+beneficiary' });
-                ctAllRecords = data || [];
-                buildCtFilters();
-                buildCtCalAllDates();
-                if (ctFilterMode === 'cal') renderCtCalendar();
-                renderCarTimeRecords();
-            } catch(e) {
-                content.innerHTML = '<div class="error">❌ 데이터 로드 실패: ' + (e?.message || '오류') + '</div>';
+
+            const { data, error } = await supabaseClient
+                .from('cartime_items')
+                .select('*')
+                .order('date', { ascending: true })
+                .order('beneficiary', { ascending: true });
+
+            if (error) {
+                content.innerHTML = '<div class="error">❌ 데이터 로드 실패: ' + error.message + '</div>';
+                return;
             }
+
+            ctAllRecords = data || [];
+            buildCtFilters();
+            buildCtCalAllDates();
+            if (ctFilterMode === 'cal') renderCtCalendar();
+            renderCarTimeRecords();
         }
 
         function buildCtFilters() {
@@ -2760,12 +2747,11 @@
 
         async function deleteCtRecord(id) {
             if (!confirm('이 기록을 삭제하시겠습니까?')) return;
-            try {
-                await pb.collection('cartime_items').delete(id);
-                ctAllRecords = ctAllRecords.filter(r => r.id !== id);
-                renderCarTimeRecords();
-                showCtStatus('✅ 기록이 삭제되었습니다.');
-            } catch(e) { alert('삭제 실패: ' + (e?.message || '오류')); }
+            const { error } = await supabaseClient.from('cartime_items').delete().eq('id', id);
+            if (error) { alert('삭제 실패: ' + error.message); return; }
+            ctAllRecords = ctAllRecords.filter(r => r.id !== id);
+            renderCarTimeRecords();
+            showCtStatus('✅ 기록이 삭제되었습니다.');
         }
 
         async function deleteAllCarTimeRecords() {
@@ -2783,6 +2769,7 @@
             }
             if (!confirm(label + '송영시간표 비교 기록을 모두 삭제하시겠습니까?')) return;
 
+            let query;
             if (ctFilterMode === 'cal' ? ctCalSelectedDates.size > 0 : (ctFilterMode === 'range' ? (dateFrom || dateTo) : (yearFilter || monthFilter))) {
                 const filtered = ctAllRecords.filter(r => {
                     if (ctFilterMode === 'cal') {
@@ -2799,13 +2786,13 @@
                 });
                 const ids = filtered.map(r => r.id);
                 if (ids.length === 0) { alert('삭제할 기록이 없습니다.'); return; }
-                const r1 = await pbDeleteByIds('cartime_items', ids);
-                if (r1.error) { alert('삭제 실패: ' + r1.error.message); return; }
+                query = supabaseClient.from('cartime_items').delete().in('id', ids);
             } else {
-                const r2 = await pbDeleteAll('cartime_items');
-                if (r2.error) { alert('삭제 실패: ' + r2.error.message); return; }
+                query = supabaseClient.from('cartime_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
             }
 
+            const { error } = await query;
+            if (error) { alert('삭제 실패: ' + error.message); return; }
             await loadCarTimeRecords();
             showCtStatus('✅ 선택한 기록이 모두 삭제되었습니다.');
         }
@@ -2836,7 +2823,7 @@
             const msgEl = document.getElementById('workingtimeSaveStatusMsg');
             msgEl.style.display = 'block';
             msgEl.style.color = '#555';
-            msgEl.textContent = '⏳ PocketBase에 저장 중...';
+            msgEl.textContent = '⏳ Supabase에 저장 중...';
 
             const rows = compareData.by_date.map(item => ({
                 date: item.date,
@@ -2856,14 +2843,16 @@
                 attendance_break: item.attendance_break !== '-' ? item.attendance_break : null
             }));
 
-            const { error } = await pbUpsert('workingtime_items', rows, ['date', 'employee', 'row_index']);
+            const { error } = await supabaseClient
+                .from('workingtime_items')
+                .upsert(rows, { onConflict: 'date,employee,row_index' });
 
             if (error) {
                 msgEl.style.color = '#dc3545';
                 msgEl.textContent = '❌ 저장 실패: ' + error.message;
             } else {
                 msgEl.style.color = '#28a745';
-                msgEl.textContent = '✅ ' + rows.length + '건이 PocketBase에 저장되었습니다.';
+                msgEl.textContent = '✅ ' + rows.length + '건이 Supabase에 저장되었습니다.';
                 setTimeout(() => { msgEl.style.display = 'none'; }, 4000);
             }
         }
@@ -2871,16 +2860,24 @@
         async function loadWorkingTimeRecords() {
             const content = document.getElementById('wtRecordsContent');
             content.innerHTML = '<div style="text-align:center;padding:30px;color:#666;">⏳ 데이터를 불러오는 중...</div>';
-            try {
-                const data = await pb.collection('workingtime_items').getFullList({ sort: '+date,+employee,+row_index' });
-                wtAllRecords = data || [];
-                buildWtFilters();
-                buildWtCalAllDates();
-                if (wtFilterMode === 'cal') renderWtCalendar();
-                renderWorkingTimeRecords();
-            } catch(e) {
-                content.innerHTML = '<div class="error">❌ 데이터 로드 실패: ' + (e?.message || '오류') + '</div>';
+
+            const { data, error } = await supabaseClient
+                .from('workingtime_items')
+                .select('*')
+                .order('date', { ascending: true })
+                .order('employee', { ascending: true })
+                .order('row_index', { ascending: true });
+
+            if (error) {
+                content.innerHTML = '<div class="error">❌ 데이터 로드 실패: ' + error.message + '</div>';
+                return;
             }
+
+            wtAllRecords = data || [];
+            buildWtFilters();
+            buildWtCalAllDates();
+            if (wtFilterMode === 'cal') renderWtCalendar();
+            renderWorkingTimeRecords();
         }
 
         function buildWtFilters() {
@@ -3202,10 +3199,11 @@
 
         async function deleteWtRecord(date, employee) {
             if (!confirm(date + ' / ' + employee + ' 의 기록을 삭제하시겠습니까?')) return;
-            const ids = wtAllRecords
-                .filter(r => r.date === date && r.employee === employee)
-                .map(r => r.id);
-            const { error } = await pbDeleteByIds('workingtime_items', ids);
+            const { error } = await supabaseClient
+                .from('workingtime_items')
+                .delete()
+                .eq('date', date)
+                .eq('employee', employee);
             if (error) { alert('삭제 실패: ' + error.message); return; }
             wtAllRecords = wtAllRecords.filter(r => !(r.date === date && r.employee === employee));
             renderWorkingTimeRecords();
@@ -3225,6 +3223,7 @@
             }
             if (!confirm(label + '근무시간 비교 기록을 모두 삭제하시겠습니까?')) return;
 
+            let query;
             if (wtFilterMode === 'range' ? (dateFrom || dateTo) : (yearFilter || monthFilter)) {
                 const filtered = wtAllRecords.filter(r => {
                     if (r.row_index !== 0) return false;
@@ -3240,13 +3239,13 @@
                 });
                 const ids = filtered.map(r => r.id);
                 if (ids.length === 0) { alert('삭제할 기록이 없습니다.'); return; }
-                const r1 = await pbDeleteByIds('workingtime_items', ids);
-                if (r1.error) { alert('삭제 실패: ' + r1.error.message); return; }
+                query = supabaseClient.from('workingtime_items').delete().in('id', ids);
             } else {
-                const r2 = await pbDeleteAll('workingtime_items');
-                if (r2.error) { alert('삭제 실패: ' + r2.error.message); return; }
+                query = supabaseClient.from('workingtime_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
             }
 
+            const { error } = await query;
+            if (error) { alert('삭제 실패: ' + error.message); return; }
             await loadWorkingTimeRecords();
             showWtStatus('✅ 선택한 기록이 모두 삭제되었습니다.');
         }
@@ -3258,7 +3257,7 @@
             setTimeout(() => { el.style.display = 'none'; }, 3000);
         }
         // ===== workingtime_items 연동 끝 =====
-        // ===== PocketBase 연동 끝 =====
+        // ===== Supabase 연동 끝 =====
     </script>
 </body>
 </html>
