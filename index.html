@@ -1593,7 +1593,7 @@
             document.getElementById('scheduleDateInfo').textContent = '📅 ' + dateWithWeekday + ' (' + (currentScheduleDateIndex + 1) + '/' + scheduleDates.length + '일)';
             
             const results = currentResults.results;
-            let html = buildScheduleTable(results, true, false);
+            let html = buildScheduleTable(results, true, false, dateWithWeekday);
             
             // 요약 정보
             const totalCount = results.length;
@@ -1651,7 +1651,7 @@
             var amDiffCount = diffItems.filter(function(r) { return r.am_match === '다름'; }).length;
             var pmDiffCount = diffItems.filter(function(r) { return r.pm_match === '다름'; }).length;
             
-            let html = buildScheduleTable(diffItems, true, true);
+            let html = buildScheduleTable(diffItems, true, true, dateWithWeekday);
             
             html += '<div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px;">' +
                 '<h4 style="margin-bottom: 10px;">⚠️ ' + dateWithWeekday + ' 다름 항목</h4>' +
@@ -1690,7 +1690,7 @@
                 
                 html += '<div style="margin-bottom: 30px; padding: 20px; background: #fff8f8; border: 2px solid #dc3545; border-radius: 12px;">';
                 html += '<h3 style="color: #dc3545; margin-bottom: 15px;">📅 ' + dateWithWeekday + ' <span style="font-size:0.8em;background:#17a2b8;color:white;padding:2px 8px;border-radius:4px;margin-right:5px;">오전 ' + amDiffCount + '건</span><span style="font-size:0.8em;background:#fd7e14;color:white;padding:2px 8px;border-radius:4px;">오후 ' + pmDiffCount + '건</span></h3>';
-                html += buildScheduleTable(diffItems, false, true);
+                html += buildScheduleTable(diffItems, false, true, dateWithWeekday);
                 html += '</div>';
             });
             
@@ -1743,7 +1743,7 @@
             return 'background:' + color + ';';
         }
 
-        function buildScheduleTable(items, showIndex, diffOnly) {
+        function buildScheduleTable(items, showIndex, diffOnly, dateLabel) {
             var amSortEl = document.getElementById('scheduleAmSortSelect');
             var pmSortEl = document.getElementById('schedulePmSortSelect');
             var amSort = amSortEl ? amSortEl.value : 'default';
@@ -1774,6 +1774,7 @@
             html += '<table class="compare-table schedule-table-am" style="font-size: 11pt; table-layout: auto; margin: 0 auto; max-width: 100%; width: auto;">';
             html += `<tr>
                 <th class="sortable-header" data-sort="no" data-period="am" onclick="sortScheduleTable('am', 'no')" style="white-space:nowrap;">No<span class="sort-icon">${getSortIcon('am', 'no')}</span></th>
+                <th style="white-space:nowrap;">날짜</th>
                 <th class="sortable-header" data-sort="seq" data-period="am" onclick="sortScheduleTable('am', 'seq')" style="white-space:nowrap;">순번<span class="sort-icon">${getSortIcon('am', 'seq')}</span></th>
                 <th class="sortable-header" data-sort="name" data-period="am" onclick="sortScheduleTable('am', 'name')" style="white-space:nowrap;">수급자<span class="sort-icon">${getSortIcon('am', 'name')}</span></th>
                 <th class="sortable-header" data-sort="transport" data-period="am" onclick="sortScheduleTable('am', 'transport')" style="white-space:nowrap;">이동(케어포)<span class="sort-icon">${getSortIcon('am', 'transport')}</span></th>
@@ -1788,7 +1789,7 @@
             </tr>`;
             
             if (amItems.length === 0 && diffOnly) {
-                html += '<tr><td colspan="12" style="text-align:center;color:#28a745;padding:20px;">✅ 오전 다름 항목 없음</td></tr>';
+                html += '<tr><td colspan="13" style="text-align:center;color:#28a745;padding:20px;">✅ 오전 다름 항목 없음</td></tr>';
             } else {
                 // 정렬 기준 컬럼의 그룹값 추출 함수
                 const amSortCol = scheduleSortState.am.column;
@@ -1856,6 +1857,7 @@
                     
                     html += `<tr class="${rowClass}">
                         <td style="${amCellBg}">${idx + 1}</td>
+                        <td style="${amCellBg}white-space:nowrap;">${dateLabel || '-'}</td>
                         <td style="${amCellBg}color:#0d6efd;font-weight:bold;">${item.am_seq || '-'}</td>
                         <td style="${amCellBg}white-space:nowrap;"><strong>${item.beneficiary}</strong></td>
                         <td style="${amCellBg}${transportStyle}">${item.transport_start || '-'}</td>
@@ -1884,6 +1886,7 @@
             html += '<table class="compare-table schedule-table-pm" style="font-size: 11pt; table-layout: auto; margin: 0 auto; max-width: 100%; width: auto;">';
             html += `<tr>
                 <th class="sortable-header" data-sort="no" data-period="pm" onclick="sortScheduleTable('pm', 'no')" style="white-space:nowrap;">No<span class="sort-icon">${getSortIcon('pm', 'no')}</span></th>
+                <th style="white-space:nowrap;">날짜</th>
                 <th class="sortable-header" data-sort="seq" data-period="pm" onclick="sortScheduleTable('pm', 'seq')" style="white-space:nowrap;">순번<span class="sort-icon">${getSortIcon('pm', 'seq')}</span></th>
                 <th class="sortable-header" data-sort="name" data-period="pm" onclick="sortScheduleTable('pm', 'name')" style="white-space:nowrap;">수급자<span class="sort-icon">${getSortIcon('pm', 'name')}</span></th>
                 <th class="sortable-header" data-sort="transport" data-period="pm" onclick="sortScheduleTable('pm', 'transport')" style="white-space:nowrap;">이동(케어포)<span class="sort-icon">${getSortIcon('pm', 'transport')}</span></th>
@@ -1898,7 +1901,7 @@
             </tr>`;
             
             if (pmItems.length === 0 && diffOnly) {
-                html += '<tr><td colspan="12" style="text-align:center;color:#28a745;padding:20px;">✅ 오후 다름 항목 없음</td></tr>';
+                html += '<tr><td colspan="13" style="text-align:center;color:#28a745;padding:20px;">✅ 오후 다름 항목 없음</td></tr>';
             } else {
                 // 정렬 기준 컬럼의 그룹값 추출
                 const pmSortCol = scheduleSortState.pm.column;
@@ -1965,6 +1968,7 @@
                     
                     html += `<tr class="${rowClass}">
                         <td style="${pmCellBg}">${idx + 1}</td>
+                        <td style="${pmCellBg}white-space:nowrap;">${dateLabel || '-'}</td>
                         <td style="${pmCellBg}color:#0d6efd;font-weight:bold;">${item.pm_seq || '-'}</td>
                         <td style="${pmCellBg}white-space:nowrap;"><strong>${item.beneficiary}</strong></td>
                         <td style="${pmCellBg}${transportStyle}">${item.transport_end || '-'}</td>
