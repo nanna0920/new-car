@@ -1432,6 +1432,16 @@
                     var carBuf = await readFileAsArrayBuffer(carListFile);
                     validCarListData = parseCarListExcel(carBuf);
                 }
+                // 새 비교를 시작할 때마다 차량별 배경색을 초기화하고,
+                // 차량목록 파일 순서대로 고유한 색을 미리 배정해 항상 같은 차량은 같은 색,
+                // 서로 다른 차량은 겹치지 않는 색을 갖도록 한다.
+                resetCarColorMap();
+                if (validCarListData && validCarListData.list) {
+                    validCarListData.list.forEach(function(carName) {
+                        var num = validCarListData.numbers ? validCarListData.numbers[carName] : '';
+                        assignCarColor(num || carName);
+                    });
+                }
                 var schBuf = await readFileAsArrayBuffer(scheduleFile1);
                 var trBuf = await readFileAsArrayBuffer(scheduleFile2);
                 var schedParsed = parseScheduleExcel(schBuf, validCarListData);
@@ -1707,13 +1717,26 @@
             return 'color:#999 !important;';
         }
 
-        // 차량별로 구분되는 파스텔 배경색을 부여한다 (동일 차량이면 항상 동일한 색).
-        var CAR_COLOR_PALETTE = ['#ffe3bf', '#cdefdf', '#d6e0ff', '#ffd7e0', '#fff2ad', '#c9f0f2', '#e4d3fa', '#dcefc0', '#ffd0e8', '#c7ddff', '#f2ddc9', '#d3e8d6'];
+        // 차량별로 서로 겹치지 않는 고유한 파스텔 배경색을 부여한다.
+        // (해시 방식은 서로 다른 차량이 우연히 같은 색으로 겹칠 수 있어,
+        //  실제로 등장한 차량 순서대로 팔레트에서 하나씩 배정해 겹치지 않도록 한다.)
+        var CAR_COLOR_PALETTE = ['#ffe3bf', '#cdefdf', '#d6e0ff', '#ffd7e0', '#fff2ad', '#c9f0f2', '#e4d3fa', '#dcefc0', '#ffd0e8', '#c7ddff', '#f2ddc9', '#d3e8d6', '#e6ffe0', '#ffe0f0', '#e0f7ff', '#f5e6c8'];
+        var carColorMap = {};
+        var carColorNextIndex = 0;
+        function resetCarColorMap() {
+            carColorMap = {};
+            carColorNextIndex = 0;
+        }
+        function assignCarColor(carKey) {
+            if (carColorMap.hasOwnProperty(carKey)) return carColorMap[carKey];
+            var color = CAR_COLOR_PALETTE[carColorNextIndex % CAR_COLOR_PALETTE.length];
+            carColorNextIndex++;
+            carColorMap[carKey] = color;
+            return color;
+        }
         function getCarColorStyle(carKey) {
             if (!carKey || carKey === '-' || carKey === '') return '';
-            var hash = 0;
-            for (var i = 0; i < carKey.length; i++) { hash = (hash * 31 + carKey.charCodeAt(i)) >>> 0; }
-            var color = CAR_COLOR_PALETTE[hash % CAR_COLOR_PALETTE.length];
+            var color = assignCarColor(carKey);
             return 'background:' + color + ';';
         }
 
