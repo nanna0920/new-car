@@ -156,6 +156,10 @@
         .match-same { color: #fff !important; background: linear-gradient(135deg, #3fc172, #1a7a38) !important; font-weight: 700; display: inline-block; padding: 2px 10px; border-radius: 20px; box-shadow: 0 3px 8px rgba(26,122,56,0.4); }
         .match-diff { color: #fff !important; background: linear-gradient(135deg, #ef5468, #ab2333) !important; font-weight: 700; display: inline-block; padding: 2px 10px; border-radius: 20px; box-shadow: 0 3px 8px rgba(171,35,51,0.4); }
         .match-na { color: #999; font-style: italic; }
+        .match-badge { display: inline-block; padding: 3px 12px; border-radius: 20px; font-weight: 700; font-size: 0.92em; letter-spacing: 0.2px; }
+        .match-badge-same { color: #fff; background: linear-gradient(135deg, #3fc172, #1a7a38); box-shadow: 0 3px 8px rgba(26,122,56,0.4); }
+        .match-badge-diff { color: #fff; background: linear-gradient(135deg, #ef5468, #ab2333); box-shadow: 0 3px 8px rgba(171,35,51,0.45); animation: blinkDiff 1s ease-in-out infinite; }
+        .match-badge-na { color: #999; font-style: italic; background: transparent; box-shadow: none; padding: 3px 6px; }
         .row-diff td { background: #fdeceb !important; }
         .sortable-header { cursor: pointer; user-select: none; position: relative; }
         .sortable-header:hover { background: rgba(255,255,255,0.3) !important; }
@@ -1708,13 +1712,12 @@
             document.getElementById('scheduleResultContent').innerHTML = html;
         }
         
-        // 시간/차량/담당자 비교 결과는 "같음"/"다름" 텍스트로 표시한다.
-        // 배경은 건드리지 않아 차량별 행 배경이 그대로 유지되고, 글자색만
-        // 얼룩(zebra) 배경이나 다름-행 배경과 상관없이 항상 보이도록 인라인 !important로 고정한다.
-        function getMatchCellStyle(matchValue) {
-            if (matchValue === '같음') return 'color:#000 !important;font-weight:700;';
-            if (matchValue === '다름') return 'color:#dc3545 !important;font-weight:800;animation:blinkDiff 1s ease-in-out infinite;';
-            return 'color:#999 !important;';
+        // 시간/차량/담당자 비교 결과를 알약(pill) 모양 배지로 표시한다.
+        // 같음은 초록 배지, 다름은 빨간 배지 + 깜빡임 애니메이션.
+        function getMatchBadgeHtml(matchValue) {
+            if (matchValue === '같음') return '<span class="match-badge match-badge-same">✓ 같음</span>';
+            if (matchValue === '다름') return '<span class="match-badge match-badge-diff">✗ 다름</span>';
+            return '<span class="match-badge match-badge-na">-</span>';
         }
 
         // 차량별로 서로 겹치지 않는 고유한 파스텔 배경색을 부여한다.
@@ -1857,13 +1860,13 @@
                         <td style="${amCellBg}white-space:nowrap;"><strong>${item.beneficiary}</strong></td>
                         <td style="${amCellBg}${transportStyle}">${item.transport_start || '-'}</td>
                         <td style="${amCellBg}${scheduleStyle}">${item.schedule_am || '-'}</td>
-                        <td style="${amCellBg}${getMatchCellStyle(item.am_match)}">${matchText}</td>
+                        <td style="${amCellBg}text-align:center;">${getMatchBadgeHtml(item.am_match)}</td>
                         <td style="${amCellBg}${amCarTransportStyle}white-space:nowrap;">${amTransportCarDisplay}</td>
                         <td style="${amCellBg}${amCarScheduleStyle}white-space:nowrap;">${amCarDisplay}</td>
-                        <td style="${amCellBg}${getMatchCellStyle(item.am_car_match)}">${amCarMatchText}</td>
+                        <td style="${amCellBg}text-align:center;">${getMatchBadgeHtml(item.am_car_match)}</td>
                         <td style="${amCellBg}${amDriverTransportStyle}white-space:nowrap;">${item.am_transport_driver || '-'}</td>
                         <td style="${amCellBg}${amDriverScheduleStyle}white-space:nowrap;">${item.am_driver || '-'}</td>
-                        <td style="${amCellBg}${getMatchCellStyle(item.am_driver_match)}">${amDriverMatchText}</td>
+                        <td style="${amCellBg}text-align:center;">${getMatchBadgeHtml(item.am_driver_match)}</td>
                     </tr>`;
                 });
             }
@@ -1966,13 +1969,13 @@
                         <td style="${pmCellBg}white-space:nowrap;"><strong>${item.beneficiary}</strong></td>
                         <td style="${pmCellBg}${transportStyle}">${item.transport_end || '-'}</td>
                         <td style="${pmCellBg}${scheduleStyle}">${item.schedule_pm || '-'}</td>
-                        <td style="${pmCellBg}${getMatchCellStyle(item.pm_match)}">${matchText}</td>
+                        <td style="${pmCellBg}text-align:center;">${getMatchBadgeHtml(item.pm_match)}</td>
                         <td style="${pmCellBg}${pmCarTransportStyle}white-space:nowrap;">${pmTransportCarDisplay}</td>
                         <td style="${pmCellBg}${pmCarScheduleStyle}white-space:nowrap;">${pmCarDisplay}</td>
-                        <td style="${pmCellBg}${getMatchCellStyle(item.pm_car_match)}">${pmCarMatchText}</td>
+                        <td style="${pmCellBg}text-align:center;">${getMatchBadgeHtml(item.pm_car_match)}</td>
                         <td style="${pmCellBg}${pmDriverTransportStyle}white-space:nowrap;">${item.pm_transport_driver || '-'}</td>
                         <td style="${pmCellBg}${pmDriverScheduleStyle}white-space:nowrap;">${item.pm_driver || '-'}</td>
-                        <td style="${pmCellBg}${getMatchCellStyle(item.pm_driver_match)}">${pmDriverMatchText}</td>
+                        <td style="${pmCellBg}text-align:center;">${getMatchBadgeHtml(item.pm_driver_match)}</td>
                     </tr>`;
                 });
             }
