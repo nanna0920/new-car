@@ -467,6 +467,9 @@
         <!-- 송영시간표 비교 결과 -->
         <div class="card" id="scheduleResultCard" style="display:none">
             <h2 style="color: #333; margin-bottom: 20px; text-align: center;">🚌 이동서비스 vs 송영시간표 비교</h2>
+
+            <!-- 차량목록 vs 케어포 번호 불일치 경고 -->
+            <div id="scheduleCarWarning" style="display:none; margin-bottom:16px; padding:12px 14px; background:#fff8e1; border:1px solid #ffe082; border-left:4px solid #ff9800; border-radius:8px; font-size:0.9em; color:#7a4f01;"></div>
             
             <!-- 필터 탭 -->
             <div class="tab-container" id="scheduleFilterContainer">
@@ -970,7 +973,11 @@
         if (!str) return {carNumber: '', driver: ''};
         var s = String(str);
         var numMatch = s.match(/\(([^)]*)\)/);
-        var carNumber = numMatch ? numMatch[1].trim() : '';
+        // "차량종류(차량번호)\n운전자 / 동승자" 형태가 아니면(예: 편도라서 "-" 표기)
+        // 유효한 차량정보가 없는 것으로 보고 빈 값을 반환한다.
+        // (이전에는 "-" 셀에서 운전자가 "-"로 잘못 채워지는 문제가 있었다.)
+        if (!numMatch) return {carNumber: '', driver: ''};
+        var carNumber = numMatch[1].trim();
         var parenIdx = s.indexOf(')');
         var afterParen = parenIdx >= 0 ? s.substring(parenIdx + 1) : s;
         var driverPart = afterParen.split('/')[0];
@@ -978,17 +985,60 @@
         return {carNumber: carNumber, driver: driver};
     }
 
+    /* === 차량번호 정규화 및 강건한 "번호→차량명" 리졸버 ===
+       차량목록(마스터)과 케어포(이동서비스) 파일의 차량번호가
+       한 자리 오탈자/공백/전각숫자 등으로 미세하게 다를 때에도
+       같은 차량으로 인식해 차량명이 항상 표시되도록 한다. */
+    function normalizeCarNumber(s) {
+        if (!s) return '';
+        s = String(s);
+        // 전각 숫자 → 반각
+        s = s.replace(/[\uFF10-\uFF19]/g, function(ch){ return String.fromCharCode(ch.charCodeAt(0) - 0xFF10 + 0x30); });
+        // 모든 공백 제거
+        return s.replace(/\s+/g, '').trim();
+    }
+    // 한글 1글자 + 끝 4자리 숫자(예: "어7945")를 차량 식별용 꼬리표로 사용.
+    // 번호판 앞부분에 오탈자가 있어도 뒤쪽 고유부로 매칭할 수 있게 한다.
+    function carNumberTail(s) {
+        var m = normalizeCarNumber(s).match(/([가-힣])(\d{4})$/);
+        return m ? (m[1] + m[2]) : '';
+    }
+    function buildCarNameResolver(validCarList) {
+        var exact = {}, tailMap = {}, tailName = {}, listNumbers = {};
+        if (validCarList && validCarList.numbers) {
+            listNumbers = validCarList.numbers;
+            for (var name in listNumbers) {
+                var n = normalizeCarNumber(listNumbers[name]);
+                if (n) exact[n] = name;
+                var t = carNumberTail(n);
+                if (t) { (tailMap[t] = tailMap[t] || []).push(name); }
+            }
+        }
+        // 꼬리표가 유일하게 하나의 차량만 가리킬 때만 폴백 매칭에 사용(오매칭 방지)
+        for (var t2 in tailMap) { if (tailMap[t2].length === 1) tailName[t2] = tailMap[t2][0]; }
+        return {
+            listNumbers: listNumbers,
+            resolve: function(rawNum) {
+                var n = normalizeCarNumber(rawNum);
+                if (!n) return {name: '', via: 'none'};
+                if (exact[n]) return {name: exact[n], via: 'exact'};
+                var t = carNumberTail(n);
+                if (t && tailName[t]) return {name: tailName[t], via: 'tail'};
+                return {name: '', via: 'none'};
+            }
+        };
+    }
+
     /* === 이동서비스 파일 - 송영시간표 비교용 파싱 === */
     function parseTransportForSchedule(arrayBuffer, validCarList) {
         var wb = XLSX.read(arrayBuffer, {type: 'array', cellDates: true});
         var allTransportData = {};
         var weekdays = ['일', '월', '화', '수', '목', '금', '토'];
-        var numberToName = {};
-        if (validCarList && validCarList.numbers) {
-            for (var carName in validCarList.numbers) {
-                numberToName[validCarList.numbers[carName]] = carName;
-            }
-        }
+        var carResolver = buildCarNameResolver(validCarList);
+        // 차량목록과 케어포의 번호가 어긋난 차량을 기록(사용자에게 알림)
+        // { name: '아반떼C', listNumber: '232어7945', careNumber: '292어7945' }
+        var discrepancyMap = {};
+        scheduleCarDiscrepancies = [];
         
         wb.SheetNames.forEach(function(sheetName) {
             var ws = wb.Sheets[sheetName];
@@ -1017,15 +1067,28 @@
                 if (beneficiary && beneficiary !== 'nan') {
                     var startParsed = extractCarDriverInfo(startCarInfo !== 'nan' ? startCarInfo : '');
                     var endParsed = extractCarDriverInfo(endCarInfo !== 'nan' ? endCarInfo : '');
+                    var startRes = carResolver.resolve(startParsed.carNumber);
+                    var endRes = carResolver.resolve(endParsed.carNumber);
+                    // 꼬리표(tail)로만 매칭된 경우 = 차량목록과 케어포 번호가 어긋남 → 기록
+                    [ [startRes, startParsed.carNumber], [endRes, endParsed.carNumber] ].forEach(function(pair){
+                        var res = pair[0], careNum = pair[1];
+                        if (res.via === 'tail' && res.name && !discrepancyMap[res.name]) {
+                            discrepancyMap[res.name] = {
+                                name: res.name,
+                                listNumber: carResolver.listNumbers[res.name] || '',
+                                careNumber: careNum
+                            };
+                        }
+                    });
                     transportData.push({
                         beneficiary: beneficiary,
                         start_time: (startTime !== 'nan' ? startTime : ''),
                         end_time: (endTime !== 'nan' ? endTime : ''),
                         start_car_number: startParsed.carNumber,
-                        start_car_name: numberToName[startParsed.carNumber] || '',
+                        start_car_name: startRes.name,
                         start_driver: startParsed.driver,
                         end_car_number: endParsed.carNumber,
-                        end_car_name: numberToName[endParsed.carNumber] || '',
+                        end_car_name: endRes.name,
                         end_driver: endParsed.driver
                     });
                 }
@@ -1034,6 +1097,7 @@
                 allTransportData[dateKey] = {date_display: dateDisplay, data: transportData};
             }
         });
+        scheduleCarDiscrepancies = Object.keys(discrepancyMap).map(function(k){ return discrepancyMap[k]; });
         return allTransportData;
     }
 
@@ -1091,13 +1155,23 @@
                 
                 var amCarMatch = '없음', pmCarMatch = '없음';
                 if (hasCarList) {
-                    if (amTransportCarNumber && amCarNumber) amCarMatch = amTransportCarNumber === amCarNumber ? '같음' : '다름';
-                    else if (amTransportCarNumber && !amCarNumber) amCarMatch = '없음';
-                    else if (!amTransportCarNumber && amCarNumber) amCarMatch = '다름';
-                    
-                    if (pmTransportCarNumber && pmCarNumber) pmCarMatch = pmTransportCarNumber === pmCarNumber ? '같음' : '다름';
-                    else if (pmTransportCarNumber && !pmCarNumber) pmCarMatch = '없음';
-                    else if (!pmTransportCarNumber && pmCarNumber) pmCarMatch = '다름';
+                    // 차량 비교는 "차량명" 기준으로 판단한다.
+                    // (차량목록과 케어포의 번호가 한 자리 오탈자 등으로 어긋나도
+                    //  같은 차량이면 '같음'으로 처리 — 번호는 참고용 폴백)
+                    // 송영표 차량명: amCar / 케어포 차량명: amTransportCarName(리졸버로 해결됨)
+                    function compareCar(schedName, schedNum, careName, careNum) {
+                        if (schedName && careName) return schedName === careName ? '같음' : '다름';
+                        if (careName && !schedName) return schedNum ? '다름' : '없음';
+                        if (schedName && !careName) return careNum ? '다름' : '없음';
+                        // 둘 다 이름을 못 얻은 경우 번호로 폴백
+                        var a = normalizeCarNumber(careNum), b = normalizeCarNumber(schedNum);
+                        if (a && b) return a === b ? '같음' : '다름';
+                        if (a && !b) return '없음';
+                        if (!a && b) return '다름';
+                        return '없음';
+                    }
+                    amCarMatch = compareCar(amCar, amCarNumber, amTransportCarName, amTransportCarNumber);
+                    pmCarMatch = compareCar(pmCar, pmCarNumber, pmTransportCarName, pmTransportCarNumber);
                 }
                 
                 // === 운전자(담당자) 비교 ===
@@ -1142,6 +1216,7 @@
         let compareFile1 = null, compareFile2 = null, compareData = null, compareYearMonths = [], currentCompareIndex = 0, currentCompareYear = 2026, currentCompareMonth = 1;
         let scheduleFile1 = null, scheduleFile2 = null, scheduleData = null;
         let carListFile = null;
+        let scheduleCarDiscrepancies = []; // 차량목록 vs 케어포 번호 불일치 목록
         let scheduleDates = [], currentScheduleDateIndex = 0;
         let scheduleFilter = 'all'; // 'all', 'diff', 'diffDays'
         let filteredScheduleDates = [];
@@ -1557,8 +1632,28 @@
             return sorted;
         }
         
+        function renderCarDiscrepancyWarning() {
+            var el = document.getElementById('scheduleCarWarning');
+            if (!el) return;
+            if (!scheduleCarDiscrepancies || scheduleCarDiscrepancies.length === 0) {
+                el.style.display = 'none';
+                el.innerHTML = '';
+                return;
+            }
+            var rows = scheduleCarDiscrepancies.map(function(d){
+                return '<li><strong>' + d.name + '</strong> — 차량목록: <code>' + (d.listNumber || '?') +
+                       '</code> · 케어포: <code>' + (d.careNumber || '?') + '</code></li>';
+            }).join('');
+            el.innerHTML = '⚠️ <strong>차량번호가 어긋난 차량이 있습니다.</strong> ' +
+                '차량명은 뒤 4자리로 자동 매칭했지만, 정확한 비교를 위해 <strong>차량목록 파일의 번호</strong>를 케어포와 동일하게 맞춰주세요.' +
+                '<ul style="margin:8px 0 0 18px; padding:0;">' + rows + '</ul>';
+            el.style.display = 'block';
+        }
+
         function updateScheduleResults() {
             if (!scheduleDates || scheduleDates.length === 0) return;
+            
+            renderCarDiscrepancyWarning();
             
             // 필터에 따라 다른 결과 표시
             if (scheduleFilter === 'all') {
