@@ -184,7 +184,8 @@
         .compact-calendar .calendar-day-header { padding:6px; font-size:13px; }
         @media (max-width: 768px) { .upload-group { grid-template-columns: 1fr; } .compare-table { font-size: 9pt; } }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- xlsx-js-style: SheetJS 0.18.5 기반 포크 (셀 스타일 지원, API 동일) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -2514,9 +2515,93 @@
             var selSet = new Set(selArray);
             var filtered = compareData.by_date.filter(function(it) { return selSet.has(it.date); });
             if (!filtered.length) return;
-            var headers = ['날짜','직원명','순번','근무유형','이동시작','이동종료','일정시작','일정종료','일정휴게','일정총근무','출근','퇴근','출퇴휴게','출퇴총근무'];
-            var data = filtered.map(function(it) { return [formatDateWithWeekday(it.date), it.employee, it.total_rows > 1 ? (it.row_index+1)+'/'+it.total_rows : '', it.work_type, it.transport_start, it.transport_end, it.schedule_start, it.schedule_end, it.schedule_break, it.schedule_work_hours, it.attendance_start, it.attendance_end, it.attendance_break, it.attendance_work_hours]; });
-            downloadExcelFile(data, headers, '근무시간_비교_선택_' + selArray.length + '일.xlsx', '일자별 비교');
+
+            // 직원명(가나다) → 날짜 → 순번 순으로 정렬 (양식 파일과 동일)
+            var sorted = filtered.slice().sort(function(a, b) {
+                var e = (a.employee || '').localeCompare(b.employee || '', 'ko');
+                if (e !== 0) return e;
+                if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+                return (a.row_index || 0) - (b.row_index || 0);
+            });
+
+            var headers = ['날짜','직원명','이동시작','이동종료','일정시작','일정종료','출근','퇴근'];
+            var v = function(x) { return (x === undefined || x === null || x === '') ? '-' : x; };
+            var data = sorted.map(function(it) {
+                return [
+                    formatDateWithWeekday(it.date),
+                    it.employee,
+                    v(it.transport_start),
+                    v(it.transport_end),
+                    v(it.schedule_start),
+                    v(it.schedule_end),
+                    v(it.attendance_start),
+                    v(it.attendance_end)
+                ];
+            });
+
+            var ws = XLSX.utils.aoa_to_sheet([headers].concat(data));
+
+            // 양식 파일과 동일한 스타일 적용: 맑은 고딕 12pt, 가운데 정렬, 얇은 테두리,
+            // 일정시작/일정종료(E,F열)는 연한 초록 배경
+            var thin = { style: 'thin', color: { rgb: '000000' } };
+            var baseStyle = {
+                font: { name: '맑은 고딕', sz: 12 },
+                alignment: { horizontal: 'center', vertical: 'center' },
+                border: { top: thin, bottom: thin, left: thin, right: thin }
+            };
+            var fillStyle = {
+                font: { name: '맑은 고딕', sz: 12 },
+                alignment: { horizontal: 'center', vertical: 'center' },
+                border: { top: thin, bottom: thin, left: thin, right: thin },
+                fill: { patternType: 'solid', fgColor: { rgb: 'E2EFDA' } }
+            };
+            // 헤더(첫 줄): 노란색 배경 + 굵은 글씨
+            var headerStyle = {
+                font: { name: '맑은 고딕', sz: 12, bold: true },
+                alignment: { horizontal: 'center', vertical: 'center' },
+                border: { top: thin, bottom: thin, left: thin, right: thin },
+                fill: { patternType: 'solid', fgColor: { rgb: 'FFFF00' } }
+            };
+            var range = XLSX.utils.decode_range(ws['!ref']);
+            for (var r = range.s.r; r <= range.e.r; r++) {
+                for (var c = range.s.c; c <= range.e.c; c++) {
+                    var addr = XLSX.utils.encode_cell({ r: r, c: c });
+                    if (!ws[addr]) ws[addr] = { t: 's', v: '' };
+                    if (r === 0) {
+                        ws[addr].s = headerStyle; // 첫 줄: 노란 배경 + 굵게
+                    } else {
+                        ws[addr].s = (c === 4 || c === 5) ? fillStyle : baseStyle; // E,F열: 일정시작/일정종료
+                    }
+                }
+            }
+            // 열 너비: 날짜열은 글자 너비에 맞춰 자동 계산 (한글/전각 문자는 2칸으로 계산)
+            var dispWidth = function(s) {
+                s = String(s || '');
+                var w = 0;
+                for (var i = 0; i < s.length; i++) {
+                    w += /[\u1100-\u11FF\u3000-\u303F\uAC00-\uD7A3\uFF00-\uFFEF\u4E00-\u9FFF]/.test(s[i]) ? 2 : 1;
+                }
+                return w;
+            };
+            var dateColWidth = dispWidth(headers[0]);
+            data.forEach(function(row) {
+                var w = dispWidth(row[0]);
+                if (w > dateColWidth) dateColWidth = w;
+            });
+            ws['!cols'] = [
+                { wch: dateColWidth + 5 },   // 날짜 (글자 너비 + 좌우 여백)
+                { wch: 9 },    // 직원명
+                { wch: 9 },    // 이동시작
+                { wch: 9 },    // 이동종료
+                { wch: 9 },    // 일정시작
+                { wch: 9 },    // 일정종료
+                { wch: 9 },    // 출근
+                { wch: 9 }     // 퇴근
+            ];
+
+            var wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '일자별 비교');
+            XLSX.writeFile(wb, '근무시간_비교_선택_' + selArray.length + '일.xlsx');
         }
 
         function downloadExcel(view) {
