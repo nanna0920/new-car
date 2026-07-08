@@ -2541,20 +2541,24 @@
 
             var ws = XLSX.utils.aoa_to_sheet([headers].concat(data));
 
-            // 양식 파일과 동일한 스타일 적용: 맑은 고딕 12pt, 가운데 정렬, 얇은 테두리,
-            // 일정시작/일정종료(E,F열)는 연한 초록 배경
+            // 양식 파일과 동일한 스타일 적용: 맑은 고딕 12pt, 가운데 정렬, 얇은 테두리
+            // 데이터 행은 직원명별로 서로 다른 연한 배경색 적용
             var thin = { style: 'thin', color: { rgb: '000000' } };
-            var baseStyle = {
-                font: { name: '맑은 고딕', sz: 12 },
-                alignment: { horizontal: 'center', vertical: 'center' },
-                border: { top: thin, bottom: thin, left: thin, right: thin }
-            };
-            var fillStyle = {
-                font: { name: '맑은 고딕', sz: 12 },
-                alignment: { horizontal: 'center', vertical: 'center' },
-                border: { top: thin, bottom: thin, left: thin, right: thin },
-                fill: { patternType: 'solid', fgColor: { rgb: 'E2EFDA' } }
-            };
+            // 직원별 연한 파스텔 색상 팔레트 (순서대로 순환)
+            var palette = ['DDEBF7','E2EFDA','FCE4D6','FFF2CC','E4DFEC','F2DCDB','DAEEF3','EBF1DE','FDE9D9','D9E1F2'];
+            var employeeStyles = {};
+            var employeeOrder = [];
+            sorted.forEach(function(it) {
+                if (employeeStyles[it.employee]) return;
+                var color = palette[employeeOrder.length % palette.length];
+                employeeOrder.push(it.employee);
+                employeeStyles[it.employee] = {
+                    font: { name: '맑은 고딕', sz: 12 },
+                    alignment: { horizontal: 'center', vertical: 'center' },
+                    border: { top: thin, bottom: thin, left: thin, right: thin },
+                    fill: { patternType: 'solid', fgColor: { rgb: color } }
+                };
+            });
             // 헤더(첫 줄): 노란색 배경 + 굵은 글씨
             var headerStyle = {
                 font: { name: '맑은 고딕', sz: 12, bold: true },
@@ -2570,7 +2574,7 @@
                     if (r === 0) {
                         ws[addr].s = headerStyle; // 첫 줄: 노란 배경 + 굵게
                     } else {
-                        ws[addr].s = (c === 4 || c === 5) ? fillStyle : baseStyle; // E,F열: 일정시작/일정종료
+                        ws[addr].s = employeeStyles[sorted[r - 1].employee]; // 직원별 배경색
                     }
                 }
             }
