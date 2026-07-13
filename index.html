@@ -160,6 +160,15 @@
         .match-badge-same { color: #fff; background: linear-gradient(135deg, #3fc172, #1a7a38); box-shadow: 0 3px 8px rgba(26,122,56,0.4); }
         .match-badge-diff { color: #fff; background: linear-gradient(135deg, #ef5468, #ab2333); box-shadow: 0 3px 8px rgba(171,35,51,0.45); animation: blinkDiff 1s ease-in-out infinite; }
         .match-badge-na { color: #999; font-style: italic; background: transparent; box-shadow: none; padding: 3px 6px; }
+        /* === 운전자 이상 감지(오입력 의심) 배지 === */
+        .anomaly-badge { display: block; margin-top: 4px; padding: 2px 7px; border-radius: 5px; font-size: 0.78em; font-weight: 700; white-space: nowrap; cursor: help; }
+        .anomaly-care { background: #fff3cd; color: #8a5a00; border: 1px solid #ffc107; }
+        .anomaly-schedule { background: #d9edff; color: #0a4f8a; border: 1px solid #6cb2f5; }
+        .anomaly-panel { margin: 0 auto 14px; max-width: 100%; padding: 12px 16px; background: #fffaf0; border: 1px solid #ffc107; border-left: 5px solid #ffc107; border-radius: 8px; font-size: 0.92em; color: #664d03; }
+        .anomaly-panel h4 { margin: 0 0 8px; font-size: 1em; color: #8a5a00; }
+        .anomaly-panel ul { margin: 0; padding-left: 20px; }
+        .anomaly-panel li { margin: 3px 0; line-height: 1.5; }
+        .anomaly-panel code { background: #fff; padding: 1px 5px; border-radius: 3px; font-weight: 700; }
         .row-diff td { background: #fdeceb !important; }
         .sortable-header { cursor: pointer; user-select: none; position: relative; }
         .sortable-header:hover { background: rgba(255,255,255,0.3) !important; }
@@ -1102,6 +1111,75 @@
         return allTransportData;
     }
 
+    /* === 운전자 불일치 원인 자동 판별 ===
+       같은 "순번(운행조) + 같은 차량"에 함께 탄 수급자들은 원칙적으로 운전자가 동일하다.
+       따라서 한 그룹 안에서 케어포 운전자가 어긋난 사람이 "소수"라면,
+       그 사람만 케어포에 잘못 입력된 것으로 보는 것이 합리적이다.
+       반대로 그룹 "전원"이 동일하게 어긋났다면 송영시간표(구글) 쪽을 봐야 한다.
+
+       예) 2026.07.10 오후 순번7(스타렉스): 윤복란·박태희·김희명 3명은 케어포도 '이명진'인데
+           김남식만 '윤정희'(직전 운행 운전자) → 김남식 1건만 케어포 오입력으로 판정.
+
+       각 항목에 {am|pm}_driver_flag ('care' | 'schedule' | '') 와
+       {am|pm}_driver_flag_note (사유 설명)를 채워 넣는다. */
+    function annotateDriverAnomalies(results) {
+        ['am', 'pm'].forEach(function(p) {
+            var seqKey = p + '_seq', carKey = p + '_car', driverKey = p + '_driver';
+            var careDriverKey = p + '_transport_driver';
+            var flagKey = p + '_driver_flag', noteKey = p + '_driver_flag_note';
+
+            results.forEach(function(item) { item[flagKey] = ''; item[noteKey] = ''; });
+
+            // 순번 + 차량으로 운행조를 묶는다(순번 라벨이 중복 입력돼도 차량으로 한 번 더 갈라짐)
+            var groups = {};
+            results.forEach(function(item) {
+                var seq = item[seqKey], car = item[carKey], gDriver = item[driverKey];
+                // 송영표에 순번·차량·담당자가 모두 있어야 그룹 판정이 가능
+                if (!seq || !car || !gDriver) return;
+                // 케어포에 해당 시간대 탑승 기록이 없는 사람(편도 등)은 판정에서 제외
+                if (!item[careDriverKey]) return;
+                var key = seq + '||' + car;
+                (groups[key] = groups[key] || []).push(item);
+            });
+
+            Object.keys(groups).forEach(function(key) {
+                var members = groups[key];
+                if (members.length < 2) return; // 혼자 탄 경우는 비교 대상이 없음
+
+                var gDriver = members[0][driverKey];
+                var agree = members.filter(function(m) { return m[careDriverKey] === gDriver; });
+                var differ = members.filter(function(m) { return m[careDriverKey] !== gDriver; });
+                if (!differ.length) return;
+
+                var seqLabel = members[0][seqKey], carLabel = members[0][carKey];
+
+                if (agree.length >= differ.length) {
+                    // 다수가 송영표와 일치 → 어긋난 소수가 케어포 오입력일 가능성이 높다
+                    differ.forEach(function(m) {
+                        m[flagKey] = 'care';
+                        m[noteKey] = '순번 ' + seqLabel + '(' + carLabel + ') 동승 ' + members.length + '명 중 '
+                            + agree.length + '명은 케어포도 "' + gDriver + '"인데 '
+                            + m.beneficiary + '만 "' + m[careDriverKey] + '" → 케어포 오입력 의심';
+                    });
+                } else if (agree.length === 0) {
+                    // 전원이 동일하게 어긋남 → 송영시간표(구글) 쪽을 확인해야 하는 상황
+                    var careDrivers = {};
+                    differ.forEach(function(m) { careDrivers[m[careDriverKey]] = true; });
+                    if (Object.keys(careDrivers).length === 1) {
+                        var careName = Object.keys(careDrivers)[0];
+                        differ.forEach(function(m) {
+                            m[flagKey] = 'schedule';
+                            m[noteKey] = '순번 ' + seqLabel + '(' + carLabel + ') 전원(' + members.length + '명)이 '
+                                + '케어포에는 "' + careName + '" → 송영시간표(구글) 확인 필요';
+                        });
+                    }
+                }
+                // 그 외(어긋난 쪽이 다수인데 운전자도 제각각) = 판단 보류, 표시하지 않음
+            });
+        });
+        return results;
+    }
+
     function buildScheduleCompareResponse(scheduleData, allTransportData, hasCarList) {
         var allResults = {};
         var dateList = [];
@@ -1197,6 +1275,8 @@
                 });
             });
             
+            annotateDriverAnomalies(results);
+
             allResults[dateKey] = {date_display: dateDisplay, results: results};
             dateList.push({key: dateKey, display: dateDisplay});
         });
@@ -1812,6 +1892,35 @@
             return '<span class="match-badge match-badge-na">-</span>';
         }
 
+        // 운전자 불일치의 원인 추정 배지 (케어포 오입력 의심 / 송영표 확인 필요)
+        function getAnomalyBadgeHtml(flag, note) {
+            if (!flag) return '';
+            var safeNote = String(note || '').replace(/"/g, '&quot;');
+            if (flag === 'care') return '<span class="anomaly-badge anomaly-care" title="' + safeNote + '">⚠️ 케어포 오입력 의심</span>';
+            if (flag === 'schedule') return '<span class="anomaly-badge anomaly-schedule" title="' + safeNote + '">📋 송영표 확인</span>';
+            return '';
+        }
+
+        // 해당 날짜 항목들에서 감지된 이상 건을 상단 안내 패널로 요약한다.
+        function buildAnomalyPanel(items) {
+            var rows = [];
+            items.forEach(function(it) {
+                if (it.am_driver_flag) rows.push({period: '오전', flag: it.am_driver_flag, note: it.am_driver_flag_note});
+                if (it.pm_driver_flag) rows.push({period: '오후', flag: it.pm_driver_flag, note: it.pm_driver_flag_note});
+            });
+            if (!rows.length) return '';
+            var careCount = rows.filter(function(r) { return r.flag === 'care'; }).length;
+            var schedCount = rows.length - careCount;
+            var html = '<div class="anomaly-panel"><h4>🔎 운전자 불일치 원인 추정 — 케어포 오입력 의심 ' + careCount + '건'
+                + (schedCount ? ' / 송영표 확인 ' + schedCount + '건' : '') + '</h4><ul>';
+            rows.forEach(function(r) {
+                var tag = r.flag === 'care' ? '⚠️' : '📋';
+                html += '<li>' + tag + ' <code>' + r.period + '</code> ' + r.note + '</li>';
+            });
+            html += '</ul></div>';
+            return html;
+        }
+
         // 차량별로 서로 겹치지 않는 고유한 파스텔 배경색을 부여한다.
         // (해시 방식은 서로 다른 차량이 우연히 같은 색으로 겹칠 수 있어,
         //  실제로 등장한 차량 순서대로 팔레트에서 하나씩 배정해 겹치지 않도록 한다.)
@@ -1854,6 +1963,9 @@
             
             // 오전/오후를 화면에 분할하지 않고, 체크리스트로 선택된 것만 세로로 이어서 출력한다.
             let html = '<div style="width: 100%; box-sizing: border-box;">';
+
+            // 운전자 불일치의 원인 추정 요약 (필터와 무관하게 원본 items 전체 기준)
+            html += buildAnomalyPanel(items);
             
             if (!scheduleShowAm && !scheduleShowPm) {
                 html += '<div class="no-data">🌅🌆 오전/오후 표시 체크박스를 하나 이상 선택해주세요.</div></div>';
@@ -1965,7 +2077,7 @@
                         <td style="${amCellBg}text-align:center;">${getMatchBadgeHtml(item.am_car_match)}</td>
                         <td style="${amCellBg}${amDriverTransportStyle}white-space:nowrap;">${item.am_transport_driver || '-'}</td>
                         <td style="${amCellBg}${amDriverScheduleStyle}white-space:nowrap;">${item.am_driver || '-'}</td>
-                        <td style="${amCellBg}text-align:center;">${getMatchBadgeHtml(item.am_driver_match)}</td>
+                        <td style="${amCellBg}text-align:center;">${getMatchBadgeHtml(item.am_driver_match)}${getAnomalyBadgeHtml(item.am_driver_flag, item.am_driver_flag_note)}</td>
                     </tr>`;
                 });
             }
@@ -2076,7 +2188,7 @@
                         <td style="${pmCellBg}text-align:center;">${getMatchBadgeHtml(item.pm_car_match)}</td>
                         <td style="${pmCellBg}${pmDriverTransportStyle}white-space:nowrap;">${item.pm_transport_driver || '-'}</td>
                         <td style="${pmCellBg}${pmDriverScheduleStyle}white-space:nowrap;">${item.pm_driver || '-'}</td>
-                        <td style="${pmCellBg}text-align:center;">${getMatchBadgeHtml(item.pm_driver_match)}</td>
+                        <td style="${pmCellBg}text-align:center;">${getMatchBadgeHtml(item.pm_driver_match)}${getAnomalyBadgeHtml(item.pm_driver_flag, item.pm_driver_flag_note)}</td>
                     </tr>`;
                 });
             }
@@ -2643,10 +2755,15 @@
             var headers = ['날짜','수급자',
                 '이동서비스(시작)','송영시간표(오전)','오전순번','오전시간비교',
                 '이동서비스차량(오전)','송영시간표차량(오전)','오전차량비교',
-                '이동서비스운전자(오전)','송영시간표운전자(오전)','오전담당자비교',
+                '이동서비스운전자(오전)','송영시간표운전자(오전)','오전담당자비교','오전원인추정',
                 '이동서비스(종료)','송영시간표(오후)','오후순번','오후시간비교',
                 '이동서비스차량(오후)','송영시간표차량(오후)','오후차량비교',
-                '이동서비스운전자(오후)','송영시간표운전자(오후)','오후담당자비교'];
+                '이동서비스운전자(오후)','송영시간표운전자(오후)','오후담당자비교','오후원인추정'];
+            function flagText(flag) {
+                if (flag === 'care') return '케어포 오입력 의심';
+                if (flag === 'schedule') return '송영표 확인 필요';
+                return '';
+            }
             var data = [];
             var dateKeys = Object.keys(scheduleData.results).sort();
             dateKeys.forEach(function(dk) {
@@ -2663,10 +2780,10 @@
                         formatDateWithWeekday(dk), r.beneficiary,
                         r.transport_start||'', r.schedule_am||'', r.am_seq||'', r.am_match||'',
                         amTransportCar, amSchedCar, r.am_car_match||'',
-                        r.am_transport_driver||'', r.am_driver||'', r.am_driver_match||'',
+                        r.am_transport_driver||'', r.am_driver||'', r.am_driver_match||'', flagText(r.am_driver_flag),
                         r.transport_end||'', r.schedule_pm||'', r.pm_seq||'', r.pm_match||'',
                         pmTransportCar, pmSchedCar, r.pm_car_match||'',
-                        r.pm_transport_driver||'', r.pm_driver||'', r.pm_driver_match||''
+                        r.pm_transport_driver||'', r.pm_driver||'', r.pm_driver_match||'', flagText(r.pm_driver_flag)
                     ]);
                 });
             });
